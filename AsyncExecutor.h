@@ -6,20 +6,22 @@
 #include <iostream>
 
 #include "ThreadPool.h"
-#include "Dispatcher.h"
+#include "CallbackDispatcher.h"
 
 
 template<typename T>
-class AsyncOperation {
+class AsyncExecutor {
 public:
-    using AsyncOp = std::function<T()>;
+    using AsyncOperation = std::function<T()>;
     using Callback = std::function<void(T)>;
 
-    AsyncOperation(ThreadPool& threadPool, MainThreadCallbackDispatcher& dispatcher)
+    AsyncExecutor(ThreadPool& threadPool, CallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
-    void start(AsyncOp operation, Callback callback) {
-        m_threadPool.enqueue([this, op = std::move(operation), cb = std::move(callback)]() mutable {
+
+    void start(AsyncOperation operation, Callback callback) {
+        std::thread::id current_thread_id = std::this_thread::get_id();
+        m_threadPool.enqueue([this, op = std::move(operation), cb = std::move(callback), current_thread_id]() mutable {
             try {
                 T result = op();
                 m_dispatcher.post([cb = std::move(cb), result]() mutable {
@@ -29,7 +31,7 @@ public:
                         // Handle callback exception
                         std::cerr << "Callback exception: " << e.what() << std::endl;
                     }
-                });
+                }, current_thread_id);
             } catch (const std::exception& e) {
                 // Handle operation exception
                 std::cerr << "Operation exception: " << e.what() << std::endl;
@@ -37,10 +39,9 @@ public:
         });
     }
 
-    std::future<T> start(AsyncOp operation) {
+    std::future<T> start(AsyncOperation operation) {
         auto promise = std::make_shared<std::promise<T>>();
         auto future = promise->get_future();
-
         m_threadPool.enqueue([op = std::move(operation), promise]() mutable {
             try {
                 T result = op();
@@ -53,18 +54,20 @@ public:
         return future;
     }
 
+
+
 private:
     ThreadPool& m_threadPool;
-    MainThreadCallbackDispatcher& m_dispatcher;
+    CallbackDispatcher& m_dispatcher;
 };
 
 
-class VoidAsyncOperation {
+class VoidAsyncExecutor {
 public:
     using VoidAsyncOp = std::function<void()>;
     using VoidCallback = std::function<void()>;
 
-    VoidAsyncOperation(ThreadPool& threadPool, MainThreadCallbackDispatcher& dispatcher)
+    VoidAsyncExecutor(ThreadPool& threadPool, CallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
     void start(VoidAsyncOp operation, VoidCallback callback) const {
@@ -105,5 +108,5 @@ public:
 
 private:
     ThreadPool& m_threadPool;
-    MainThreadCallbackDispatcher& m_dispatcher;
+    CallbackDispatcher& m_dispatcher;
 };

@@ -1,4 +1,4 @@
-#include "AsyncOperation.h"
+#include "AsyncExecutor.h"
 #include <iostream>
 
 int main() {
@@ -8,10 +8,10 @@ int main() {
     ThreadPool threadPool;
 
     // Create a dispatcher
-    MainThreadCallbackDispatcher dispatcher;
+    CallbackDispatcher dispatcher;
 
-    // Create an AsyncOperation instance
-    AsyncOperation<int> asyncOp(threadPool, dispatcher);
+    // Create an AsyncExecutor instance
+    AsyncExecutor<int> asyncExecutor(threadPool, dispatcher);
 
     // Define the completion handler
     auto completionHandler = [](int result) {
@@ -22,7 +22,7 @@ int main() {
 
     // Start multiple asynchronous operations
     for (int i = 0; i < 5; ++i) {
-        asyncOp.start([x]() {
+        asyncExecutor.start([x]() {
             std::this_thread::sleep_for(std::chrono::seconds(2));
             return x * x;
         }, completionHandler);
@@ -32,7 +32,7 @@ int main() {
 
     std::vector<std::future<int>> futures;
     for (int i = 0; i < 5; ++i) {
-        futures.push_back(asyncOp.start([x]() {
+        futures.push_back(asyncExecutor.start([x]() {
             std::this_thread::sleep_for(std::chrono::seconds(4));
             return x * x;
         }));
@@ -46,11 +46,10 @@ int main() {
 
 
     while (!dispatcher.is_stopped()) {
-        dispatcher.execute_pending();
-        dispatcher.stop();
+
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-
+    dispatcher.stop();
     // Destructor of ThreadPool will wait for all tasks to complete
     std::cout << "Main thread completed." << std::endl;
     return 0;

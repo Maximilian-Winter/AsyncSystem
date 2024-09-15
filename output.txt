@@ -1,20 +1,20 @@
 <file_overview>
 Total files: 4
-Date generated: 2024-09-15 20:30:13
+Date generated: 2024-09-15 21:08:04
 Folder Structure:
 ├── AsyncOperation.h
-├── Dispatcher.h
+├── CallbackDispatcher.h
 ├── main.cpp
 └── ThreadPool.h
 
 Files included:
 - AsyncOperation.h
-- Dispatcher.h
+- CallbackDispatcher.h
 - ThreadPool.h
 - main.cpp
 </file_overview>
 
-<file path="AsyncOperation.h" lines="109" modified="2024-09-15 20:02:18">
+<file path="AsyncOperation.h" lines="110" modified="2024-09-15 21:06:21">
 //
 // Created by maxim on 15.09.2024.
 //
@@ -23,19 +23,20 @@ Files included:
 #include <iostream>
 
 #include "ThreadPool.h"
-#include "Dispatcher.h"
+#include "CallbackDispatcher.h"
 
 
 template<typename T>
-class AsyncOperation {
+class AsyncExecutor {
 public:
-    using AsyncOp = std::function<T()>;
+    using AsyncOperation = std::function<T()>;
     using Callback = std::function<void(T)>;
 
-    AsyncOperation(ThreadPool& threadPool, MainThreadCallbackDispatcher& dispatcher)
+    AsyncExecutor(ThreadPool& threadPool, CallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
-    void start(AsyncOp operation, Callback callback) {
+    void start(AsyncOperation operation, Callback callback) {
+
         m_threadPool.enqueue([this, op = std::move(operation), cb = std::move(callback)]() mutable {
             try {
                 T result = op();
@@ -54,7 +55,7 @@ public:
         });
     }
 
-    std::future<T> start(AsyncOp operation) {
+    std::future<T> start(AsyncOperation operation) {
         auto promise = std::make_shared<std::promise<T>>();
         auto future = promise->get_future();
 
@@ -72,16 +73,16 @@ public:
 
 private:
     ThreadPool& m_threadPool;
-    MainThreadCallbackDispatcher& m_dispatcher;
+    CallbackDispatcher& m_dispatcher;
 };
 
 
-class VoidAsyncOperation {
+class VoidAsyncExecutor {
 public:
     using VoidAsyncOp = std::function<void()>;
     using VoidCallback = std::function<void()>;
 
-    VoidAsyncOperation(ThreadPool& threadPool, MainThreadCallbackDispatcher& dispatcher)
+    VoidAsyncExecutor(ThreadPool& threadPool, CallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
     void start(VoidAsyncOp operation, VoidCallback callback) const {
@@ -122,11 +123,11 @@ public:
 
 private:
     ThreadPool& m_threadPool;
-    MainThreadCallbackDispatcher& m_dispatcher;
+    CallbackDispatcher& m_dispatcher;
 };
 </file>
 
-<file path="Dispatcher.h" lines="63" modified="2024-09-15 20:02:18">
+<file path="CallbackDispatcher.h" lines="63" modified="2024-09-15 20:58:38">
 //
 // Created by maxim on 15.09.2024.
 //
@@ -136,7 +137,7 @@ private:
 #include <condition_variable>
 #include <functional>
 
-class MainThreadCallbackDispatcher {
+class CallbackDispatcher {
 public:
     using Task = std::function<void()>;
 
@@ -278,7 +279,7 @@ private:
 };
 </file>
 
-<file path="main.cpp" lines="58" modified="2024-09-15 20:02:18">
+<file path="main.cpp" lines="57" modified="2024-09-15 21:08:02">
 #include "AsyncOperation.h"
 #include <iostream>
 
@@ -289,10 +290,10 @@ int main() {
     ThreadPool threadPool;
 
     // Create a dispatcher
-    MainThreadCallbackDispatcher dispatcher;
+    CallbackDispatcher dispatcher;
 
-    // Create an AsyncOperation instance
-    AsyncOperation<int> asyncOp(threadPool, dispatcher);
+    // Create an AsyncExecutor instance
+    AsyncExecutor<int> asyncExecutor(threadPool, dispatcher);
 
     // Define the completion handler
     auto completionHandler = [](int result) {
@@ -303,7 +304,7 @@ int main() {
 
     // Start multiple asynchronous operations
     for (int i = 0; i < 5; ++i) {
-        asyncOp.start([x]() {
+        asyncExecutor.start([x]() {
             std::this_thread::sleep_for(std::chrono::seconds(2));
             return x * x;
         }, completionHandler);
@@ -313,7 +314,7 @@ int main() {
 
     std::vector<std::future<int>> futures;
     for (int i = 0; i < 5; ++i) {
-        futures.push_back(asyncOp.start([x]() {
+        futures.push_back(asyncExecutor.start([x]() {
             std::this_thread::sleep_for(std::chrono::seconds(4));
             return x * x;
         }));
@@ -323,16 +324,15 @@ int main() {
     for (auto& future : futures) {
         int result = future.get(); // Will wait until the result is available
         std::cout << "Future result: " << result << std::endl;
+        dispatcher.execute_pending();
     }
 
 
     while (!dispatcher.is_stopped()) {
         dispatcher.execute_pending();
-        dispatcher.stop();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    // Destructor of ThreadPool will wait for all tasks to complete
     std::cout << "Main thread completed." << std::endl;
     return 0;
 }
