@@ -15,7 +15,7 @@ public:
     using AsyncOp = std::function<T()>;
     using Callback = std::function<void(T)>;
 
-    AsyncOperation(ThreadPool& threadPool, Dispatcher& dispatcher)
+    AsyncOperation(ThreadPool& threadPool, MainThreadCallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
     void start(AsyncOp operation, Callback callback) {
@@ -55,7 +55,7 @@ public:
 
 private:
     ThreadPool& m_threadPool;
-    Dispatcher& m_dispatcher;
+    MainThreadCallbackDispatcher& m_dispatcher;
 };
 
 
@@ -64,7 +64,7 @@ public:
     using VoidAsyncOp = std::function<void()>;
     using VoidCallback = std::function<void()>;
 
-    VoidAsyncOperation(ThreadPool& threadPool, Dispatcher& dispatcher)
+    VoidAsyncOperation(ThreadPool& threadPool, MainThreadCallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
     void start(VoidAsyncOp operation, VoidCallback callback) const {
@@ -86,7 +86,24 @@ public:
         });
     }
 
+    std::future<void> start(VoidAsyncOp operation)
+    {
+        auto promise = std::make_shared<std::promise<void>>();
+        auto future = promise->get_future();
+
+        m_threadPool.enqueue([op = std::move(operation), promise]() mutable {
+            try {
+                op();
+                promise->set_value();
+            } catch (...) {
+                promise->set_exception(std::current_exception());
+            }
+        });
+
+        return future;
+    }
+
 private:
     ThreadPool& m_threadPool;
-    Dispatcher& m_dispatcher;
+    MainThreadCallbackDispatcher& m_dispatcher;
 };

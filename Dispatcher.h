@@ -7,7 +7,7 @@
 #include <condition_variable>
 #include <functional>
 
-class Dispatcher {
+class MainThreadCallbackDispatcher {
 public:
     using Task = std::function<void()>;
 

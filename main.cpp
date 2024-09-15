@@ -8,7 +8,7 @@ int main() {
     ThreadPool threadPool;
 
     // Create a dispatcher
-    Dispatcher dispatcher;
+    MainThreadCallbackDispatcher dispatcher;
 
     // Create an AsyncOperation instance
     AsyncOperation<int> asyncOp(threadPool, dispatcher);

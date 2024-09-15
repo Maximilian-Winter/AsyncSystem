@@ -8,7 +8,7 @@
 #include <queue>
 #include <condition_variable>
 #include <future>
-
+#include <atomic>
 class TaskQueue {
 public:
     using Task = std::function<void()>;

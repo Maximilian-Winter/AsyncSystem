@@ -1,6 +1,6 @@
 <file_overview>
 Total files: 4
-Date generated: 2024-09-15 19:02:11
+Date generated: 2024-09-15 20:30:13
 Folder Structure:
 ├── AsyncOperation.h
 ├── Dispatcher.h
@@ -14,7 +14,7 @@ Files included:
 - main.cpp
 </file_overview>
 
-<file path="AsyncOperation.h" lines="92" modified="2024-09-15 18:51:56">
+<file path="AsyncOperation.h" lines="109" modified="2024-09-15 20:02:18">
 //
 // Created by maxim on 15.09.2024.
 //
@@ -32,7 +32,7 @@ public:
     using AsyncOp = std::function<T()>;
     using Callback = std::function<void(T)>;
 
-    AsyncOperation(ThreadPool& threadPool, Dispatcher& dispatcher)
+    AsyncOperation(ThreadPool& threadPool, MainThreadCallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
     void start(AsyncOp operation, Callback callback) {
@@ -72,7 +72,7 @@ public:
 
 private:
     ThreadPool& m_threadPool;
-    Dispatcher& m_dispatcher;
+    MainThreadCallbackDispatcher& m_dispatcher;
 };
 
 
@@ -81,7 +81,7 @@ public:
     using VoidAsyncOp = std::function<void()>;
     using VoidCallback = std::function<void()>;
 
-    VoidAsyncOperation(ThreadPool& threadPool, Dispatcher& dispatcher)
+    VoidAsyncOperation(ThreadPool& threadPool, MainThreadCallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
     void start(VoidAsyncOp operation, VoidCallback callback) const {
@@ -103,13 +103,30 @@ public:
         });
     }
 
+    std::future<void> start(VoidAsyncOp operation)
+    {
+        auto promise = std::make_shared<std::promise<void>>();
+        auto future = promise->get_future();
+
+        m_threadPool.enqueue([op = std::move(operation), promise]() mutable {
+            try {
+                op();
+                promise->set_value();
+            } catch (...) {
+                promise->set_exception(std::current_exception());
+            }
+        });
+
+        return future;
+    }
+
 private:
     ThreadPool& m_threadPool;
-    Dispatcher& m_dispatcher;
+    MainThreadCallbackDispatcher& m_dispatcher;
 };
 </file>
 
-<file path="Dispatcher.h" lines="63" modified="2024-09-15 18:24:07">
+<file path="Dispatcher.h" lines="63" modified="2024-09-15 20:02:18">
 //
 // Created by maxim on 15.09.2024.
 //
@@ -119,7 +136,7 @@ private:
 #include <condition_variable>
 #include <functional>
 
-class Dispatcher {
+class MainThreadCallbackDispatcher {
 public:
     using Task = std::function<void()>;
 
@@ -175,7 +192,7 @@ private:
 };
 </file>
 
-<file path="ThreadPool.h" lines="83" modified="2024-09-15 18:40:15">
+<file path="ThreadPool.h" lines="83" modified="2024-09-15 20:05:54">
 //
 // Created by maxim on 15.09.2024.
 //
@@ -186,7 +203,7 @@ private:
 #include <queue>
 #include <condition_variable>
 #include <future>
-
+#include <atomic>
 class TaskQueue {
 public:
     using Task = std::function<void()>;
@@ -261,7 +278,7 @@ private:
 };
 </file>
 
-<file path="main.cpp" lines="58" modified="2024-09-15 18:54:57">
+<file path="main.cpp" lines="58" modified="2024-09-15 20:02:18">
 #include "AsyncOperation.h"
 #include <iostream>
 
@@ -272,7 +289,7 @@ int main() {
     ThreadPool threadPool;
 
     // Create a dispatcher
-    Dispatcher dispatcher;
+    MainThreadCallbackDispatcher dispatcher;
 
     // Create an AsyncOperation instance
     AsyncOperation<int> asyncOp(threadPool, dispatcher);
