@@ -85,15 +85,18 @@ private:
 template<typename T>
 class AsyncOperation {
 public:
-    using AsyncOp = std::function<T()>;
-    using Callback = std::function<void(T)>;
+    using AsyncOp = const std::function<T()>;
+    using Callback = const std::function<void(T)>;
 
-    explicit AsyncOperation(ThreadPool& threadPool) : m_threadPool(threadPool) {}
+    AsyncOperation(ThreadPool& threadPool, Dispatcher& dispatcher)
+       : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
-    void start(AsyncOp operation, const Callback& callback) {
+    void start(AsyncOp& operation, Callback& callback) {
         m_threadPool.enqueue([this, operation, callback]() {
             T result = operation();
-            callback(result);
+            m_dispatcher.post([callback, result]() {
+                callback(result);
+            });
         });
     }
 
@@ -114,6 +117,7 @@ public:
     }
 private:
     ThreadPool& m_threadPool;
+    Dispatcher& m_dispatcher;
 };
 
 
@@ -122,17 +126,22 @@ public:
     using VoidAsyncOp = std::function<void()>;
     using VoidCallback = std::function<void()>;
 
-    explicit VoidAsyncOperation(ThreadPool& threadPool) : m_threadPool(threadPool) {}
+    explicit VoidAsyncOperation(ThreadPool& threadPool, Dispatcher& dispatcher)
+       : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
 
-    void start(const VoidAsyncOp& operation, const VoidCallback& callback) {
+    void start(const VoidAsyncOp& operation, const VoidCallback& callback) const
+    {
         // Enqueue the asynchronous task
         m_threadPool.enqueue([this, operation, callback]() {
             operation();
-            callback();
+            m_dispatcher.post([callback]() {
+                callback();
+            });
         });
     }
 private:
     ThreadPool& m_threadPool;
+    Dispatcher& m_dispatcher;
 };
 
 
@@ -142,63 +151,55 @@ int main() {
     // Create a thread pool
     ThreadPool threadPool;
 
+    // Create a dispatcher
+    Dispatcher dispatcher;
+
     // Create an AsyncOperation instance
-    AsyncOperation<int> asyncOp(threadPool);
+    AsyncOperation<int> asyncOp(threadPool, dispatcher);
 
     // Define the completion handler
     auto completionHandler = [](int result) {
         std::cout << "Asynchronous operation completed with result: " << result << std::endl;
     };
-    int x = 8;
-    // Start the asynchronous operation
-    asyncOp.start([x]()
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        return x * x;
-    },
-    completionHandler
-    );
-    // Start the asynchronous operation
-    asyncOp.start([x]()
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(4));
-        return x * x;
-    },
-    completionHandler
-    );
-    // Start the asynchronous operation
-    asyncOp.start([x]()
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(6));
-        return x * x;
-    },
-    completionHandler
-    );
-    // Start the asynchronous operation
-    asyncOp.start([x]()
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(8));
-        return x * x;
-    },
-    completionHandler
-    );
-    // Start the asynchronous operation
-    asyncOp.start([x]()
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(10));
-        return x * x;
-    },
-    completionHandler
-    );
-    std::cout << "Asynchronous operation initiated. Main thread is free to continue..." << std::endl;
 
-    // Do other work in the main thread
-    for (int i = 0; i < 10; ++i) {
+    int x = 8;
+
+    // Start multiple asynchronous operations
+    for (int i = 0; i < 5; ++i) {
+        asyncOp.start([x]() {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            return x * x;
+        }, completionHandler);
+    }
+
+    std::cout << "Asynchronous operations initiated. Main thread is free to continue..." << std::endl;
+
+    // Main thread event loop to process dispatcher tasks
+    // Break condition (for demonstration purposes)
+    static int count = 0;
+    while (true) {
+        // Process any pending callbacks
+        dispatcher.execute_pending();
+
+        // Do other work in the main thread
         std::cout << "Main thread working..." << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+
+        if (++count >= 10) {
+            dispatcher.stop(); // Stop the dispatcher
+            break;
+        }
+    }
+
+    // Ensure all tasks have been processed before exiting
+    while (!dispatcher.is_stopped()) {
+        dispatcher.execute_pending();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     // Destructor of ThreadPool will wait for all tasks to complete
     std::cout << "Main thread completed." << std::endl;
     return 0;
 }
+
