@@ -45,13 +45,13 @@ public:
     // Stop the dispatcher
     void stop() {
         {
-            std::lock_guard lock(m_mutex);
+            std::lock_guard<std::mutex> lock(m_mutex);
             m_stopped = true;
         }
         m_condition.notify_all();
     }
 
-    [[nodiscard]] bool is_stopped() const {
+    bool is_stopped() const {
         return m_stopped;
     }
 
