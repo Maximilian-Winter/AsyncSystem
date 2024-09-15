@@ -43,10 +43,10 @@ int main() {
         int result = future.get(); // Will wait until the result is available
         std::cout << "Future result: " << result << std::endl;
     }
+    dispatcher.execute_pending();
 
 
     while (!dispatcher.is_stopped()) {
-
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     dispatcher.stop();
