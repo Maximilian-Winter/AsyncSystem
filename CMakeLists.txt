@@ -14,16 +14,16 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+include_directories(
+        ${CMAKE_SOURCE_DIR}/async_utilities/include
+)
+
 # Main executable
-add_executable(AsyncSystem main.cpp)
+add_executable(AsyncSystem src/example_usage.cpp)
 
 # Test executable
 add_executable(AsyncSystemTests
-        lock_free_tests.cpp
-        # Add other source files needed for testing, e.g.:
-        # LockFreeQueue.h
-        # LockFreeList.h
-        # LockFreeStack.h
+        src/lock_free_tests.cpp
 )
 
 # Link test executable against Google Test
