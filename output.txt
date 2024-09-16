@@ -1,22 +1,32 @@
 <file_overview>
-Total files: 6
-Date generated: 2024-09-15 22:43:32
+Total files: 8
+Date generated: 2024-09-16 07:04:30
 Folder Structure:
-├── AsyncExecutor.h
-├── CallbackDispatcher.h
-├── LockFreeQueue.h
-├── main.cpp
-└── ThreadPool.h
+├── async_utilities/
+│   └── include/
+│       ├── AsyncExecutor.h
+│       ├── CallbackDispatcher.h
+│       ├── LockFreeList.h
+│       ├── LockFreeQueue.h
+│       ├── LockFreeStack.h
+│       ├── TaskQueue.h
+│       └── ThreadPool.h
+└── src/
+    └── example_usage.cpp
+
 
 Files included:
-- AsyncExecutor.h
-- CallbackDispatcher.h
-- LockFreeQueue.h
-- ThreadPool.h
-- main.cpp
+- async_utilities\include\AsyncExecutor.h
+- async_utilities\include\CallbackDispatcher.h
+- async_utilities\include\LockFreeList.h
+- async_utilities\include\LockFreeQueue.h
+- async_utilities\include\LockFreeStack.h
+- async_utilities\include\TaskQueue.h
+- async_utilities\include\ThreadPool.h
+- src\example_usage.cpp
 </file_overview>
 
-<file path="AsyncExecutor.h" lines="112" modified="2024-09-15 22:42:28">
+<file path="async_utilities\include\AsyncExecutor.h" lines="112" modified="2024-09-15 22:42:28">
 //
 // Created by maxim on 15.09.2024.
 //
@@ -131,7 +141,7 @@ private:
 };
 </file>
 
-<file path="CallbackDispatcher.h" lines="80" modified="2024-09-15 21:24:18">
+<file path="async_utilities\include\CallbackDispatcher.h" lines="80" modified="2024-09-15 21:24:18">
 //
 // Created by maxim on 15.09.2024.
 //
@@ -214,33 +224,144 @@ private:
 };
 </file>
 
-<file path="LockFreeQueue.h" lines="95" modified="2024-09-15 22:37:23">
+<file path="async_utilities\include\LockFreeList.h" lines="115" modified="2024-09-16 02:51:30">
 //
-// Created by maxim on 15.09.2024.
+// Created by maxim on 16.09.2024.
 //
+
 #pragma once
-#include <future>
 #include <atomic>
 #include <memory>
-
+#include <optional>
 
 template <typename T>
-class LockFreeQueue {
+class LockFreeList {
 private:
-
     struct Node {
         std::shared_ptr<T> data;
         std::atomic<Node*> next;
 
         Node() : next(nullptr) {}
-        Node(T value) : data(std::make_shared<T>(value)), next(nullptr) {}
+        Node(const T& value) : data(std::make_shared<T>(value)), next(nullptr) {}
+    };
+
+    std::atomic<Node*> head;
+
+public:
+    LockFreeList() : head(nullptr) {}
+
+    ~LockFreeList() {
+        Node* current = head.load(std::memory_order_relaxed);
+        while (current) {
+            Node* next = current->next.load(std::memory_order_relaxed);
+            delete current;
+            current = next;
+        }
+    }
+
+    void insert_after(const T& value, const T& after_value) {
+        Node* new_node = new Node(value);
+        Node* current = head.load(std::memory_order_acquire);
+
+        while (true) {
+            while (current && *(current->data) != after_value) {
+                current = current->next.load(std::memory_order_acquire);
+            }
+
+            if (!current) {
+                delete new_node;
+                return;  // Value not found, insertion failed
+            }
+
+            new_node->next.store(current->next.load(std::memory_order_relaxed), std::memory_order_relaxed);
+
+            if (current->next.compare_exchange_weak(new_node->next.load(std::memory_order_relaxed), new_node,
+                                                    std::memory_order_release, std::memory_order_relaxed)) {
+                return;  // Insertion successful
+            }
+        }
+    }
+
+    void insert_beginning(const T& value) {
+        Node* new_node = new Node(value);
+        Node* old_head = head.load(std::memory_order_relaxed);
+
+        do {
+            new_node->next.store(old_head, std::memory_order_relaxed);
+        } while (!head.compare_exchange_weak(old_head, new_node,
+                                             std::memory_order_release, std::memory_order_relaxed));
+    }
+
+    bool remove(const T& value) {
+        Node* current = head.load(std::memory_order_acquire);
+        Node* prev = nullptr;
+
+        while (current && *(current->data) != value) {
+            prev = current;
+            current = current->next.load(std::memory_order_acquire);
+        }
+
+        if (!current) {
+            return false;  // Value not found
+        }
+
+        Node* next = current->next.load(std::memory_order_acquire);
+
+        if (prev) {
+            if (!prev->next.compare_exchange_strong(current, next,
+                                                    std::memory_order_release,
+                                                    std::memory_order_relaxed)) {
+                return false;  // Node has been removed by another thread
+                                                    }
+        } else {
+            if (!head.compare_exchange_strong(current, next,
+                                              std::memory_order_release,
+                                              std::memory_order_relaxed)) {
+                return false;  // Head has been changed by another thread
+                                              }
+        }
+
+        // Defer deletion to avoid race condition
+        std::atomic_thread_fence(std::memory_order_acquire);
+        delete current;
+        return true;
+    }
+
+    std::optional<T> find(const T& value) const {
+        Node* current = head.load(std::memory_order_acquire);
+
+        while (current) {
+            if (*(current->data) == value) {
+                return *(current->data);
+            }
+            current = current->next.load(std::memory_order_acquire);
+        }
+
+        return std::nullopt;
+    }
+};
+</file>
+
+<file path="async_utilities\include\LockFreeQueue.h" lines="77" modified="2024-09-16 02:50:53">
+#pragma once
+#include <atomic>
+#include <memory>
+
+template <typename T>
+class LockFreeQueue {
+private:
+    struct Node {
+        std::shared_ptr<T> data;
+        std::atomic<Node*> next;
+
+        Node() : next(nullptr) {}
+        explicit Node(const T& value) : data(std::make_shared<T>(value)), next(nullptr) {}
     };
 
     std::atomic<Node*> head;
     std::atomic<Node*> tail;
 
 public:
-
     LockFreeQueue() {
         Node* dummy = new Node();
         head.store(dummy);
@@ -248,62 +369,51 @@ public:
     }
 
     ~LockFreeQueue() {
-        while (Node* node = head.load(std::memory_order_relaxed)) {
-            head.store(node->next.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            delete node;
+        while (Node* old_head = head.load()) {
+            head.store(old_head->next);
+            delete old_head;
         }
     }
 
     void enqueue(const T& value) {
         Node* new_node = new Node(value);
-        Node* old_tail = nullptr;
-
         while (true) {
-            old_tail = tail.load(std::memory_order_acquire);
-            Node* tail_next = old_tail->next.load(std::memory_order_acquire);
-
-            if (old_tail == tail.load(std::memory_order_acquire)) {
-                if (tail_next == nullptr) {
-                    if (old_tail->next.compare_exchange_weak(
-                            tail_next, new_node,
-                            std::memory_order_release, std::memory_order_relaxed)) {
-                        break;
+            Node* old_tail = tail.load();
+            Node* next = old_tail->next.load();
+            if (old_tail == tail.load()) {
+                if (next == nullptr) {
+                    if (old_tail->next.compare_exchange_weak(next, new_node)) {
+                        tail.compare_exchange_strong(old_tail, new_node);
+                        return;
                     }
                 } else {
-                    tail.compare_exchange_weak(
-                        old_tail, tail_next,
-                        std::memory_order_release, std::memory_order_relaxed);
+                    tail.compare_exchange_weak(old_tail, next);
                 }
             }
         }
-        tail.compare_exchange_weak(
-            old_tail, new_node,
-            std::memory_order_release, std::memory_order_relaxed);
     }
 
     bool dequeue(T& result) {
-        Node* old_head = nullptr;
-
         while (true) {
-            old_head = head.load(std::memory_order_acquire);
+            Node* old_head = head.load(std::memory_order_acquire);
             Node* old_tail = tail.load(std::memory_order_acquire);
-            Node* head_next = old_head->next.load(std::memory_order_acquire);
+            Node* next = old_head->next.load(std::memory_order_acquire);
 
             if (old_head == head.load(std::memory_order_acquire)) {
                 if (old_head == old_tail) {
-                    if (head_next == nullptr) {
+                    if (next == nullptr) {
                         return false;  // Queue is empty
                     }
-                    tail.compare_exchange_weak(
-                        old_tail, head_next,
-                        std::memory_order_release, std::memory_order_relaxed);
+                    tail.compare_exchange_weak(old_tail, next, std::memory_order_release, std::memory_order_relaxed);
                 } else {
-                    if (head.compare_exchange_weak(
-                            old_head, head_next,
-                            std::memory_order_release, std::memory_order_relaxed)) {
-                        result = *(head_next->data);
-                        delete old_head;
-                        return true;
+                    if (next) {
+                        result = *(next->data);
+                        if (head.compare_exchange_weak(old_head, next, std::memory_order_release, std::memory_order_relaxed)) {
+                            // Defer deletion to avoid race condition
+                            std::atomic_thread_fence(std::memory_order_acquire);
+                            delete old_head;
+                            return true;
+                        }
                     }
                 }
             }
@@ -312,8 +422,127 @@ public:
 };
 </file>
 
+<file path="async_utilities\include\LockFreeStack.h" lines="63" modified="2024-09-16 02:56:45">
+//
+// Created by maxim on 16.09.2024.
+//
 
-<file path="ThreadPool.h" lines="47" modified="2024-09-15 22:38:11">
+#pragma once
+#include <atomic>
+#include <memory>
+#include <optional>
+
+template <typename T>
+class LockFreeStack {
+private:
+    struct Node {
+        std::shared_ptr<T> data;
+        std::atomic<Node*> next;
+
+        Node(const T& value) : data(std::make_shared<T>(value)), next(nullptr) {}
+    };
+
+    std::atomic<Node*> top;
+
+public:
+    LockFreeStack() : top(nullptr) {}
+
+    ~LockFreeStack() {
+        while (Node* old_top = top.load(std::memory_order_relaxed)) {
+            top.store(old_top->next.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            delete old_top;
+        }
+    }
+
+    void push(const T& value) {
+        Node* new_node = new Node(value);
+        Node* old_top = top.load(std::memory_order_relaxed);
+        do {
+            new_node->next.store(old_top, std::memory_order_relaxed);
+        } while (!top.compare_exchange_weak(old_top, new_node,
+                                            std::memory_order_release,
+                                            std::memory_order_relaxed));
+    }
+
+    std::optional<T> pop() {
+        Node* old_top = top.load(std::memory_order_relaxed);
+        Node* new_top;
+        do {
+            if (old_top == nullptr) {
+                return std::nullopt;  // Stack is empty
+            }
+            new_top = old_top->next.load(std::memory_order_relaxed);
+        } while (!top.compare_exchange_weak(old_top, new_top,
+                                            std::memory_order_release,
+                                            std::memory_order_relaxed));
+
+        std::optional<T> result = *(old_top->data);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        delete old_top;
+        return result;
+    }
+
+    bool is_empty() const {
+        return top.load(std::memory_order_relaxed) == nullptr;
+    }
+};
+</file>
+
+<file path="async_utilities\include\TaskQueue.h" lines="51" modified="2024-09-15 22:37:23">
+//
+// Created by maxim on 15.09.2024.
+//
+#pragma once
+#include <future>
+#include <atomic>
+#include <memory>
+#include <queue>
+
+
+class TaskQueue {
+public:
+    using Task = std::function<void()>;
+
+    void push(Task task) {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_tasks.push(std::move(task));
+        }
+        m_condition.notify_one();
+    }
+
+    bool pop(Task& task) {
+        std::unique_lock<std::mutex> lock(m_mutex);
+
+        m_condition.wait(lock, [this]() {
+            return !m_tasks.empty() || m_stopped;
+        });
+
+        if (m_stopped && m_tasks.empty())
+            return false;
+
+        task = std::move(m_tasks.front());
+        m_tasks.pop();
+        return true;
+    }
+
+    void stop() {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_stopped = true;
+        }
+        m_condition.notify_all();
+    }
+
+private:
+    std::queue<Task> m_tasks;
+    std::mutex m_mutex;
+    std::condition_variable m_condition;
+    bool m_stopped = false;
+};
+</file>
+
+<file path="async_utilities\include\ThreadPool.h" lines="44" modified="2024-09-16 06:57:28">
 //
 // Created by maxim on 15.09.2024.
 //
@@ -326,9 +555,6 @@ public:
 #include <future>
 
 #include "LockFreeQueue.h"
-
-
-
 
 class ThreadPool {
 public:
@@ -363,7 +589,7 @@ private:
 };
 </file>
 
-<file path="main.cpp" lines="55" modified="2024-09-15 21:59:34">
+<file path="src\example_usage.cpp" lines="55" modified="2024-09-15 21:59:34">
 #include "AsyncExecutor.h"
 #include <iostream>
 
@@ -419,4 +645,6 @@ int main() {
     return 0;
 }
 </file>
+
+
 
