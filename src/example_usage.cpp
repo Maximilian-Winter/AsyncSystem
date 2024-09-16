@@ -33,7 +33,7 @@ int main() {
         futures.push_back(asyncExecutor.start([i]() {
             std::this_thread::sleep_for(std::chrono::seconds(4));
             return i * i;
-        }));
+        })->getFuture());
     }
 
     // Later, collect results
