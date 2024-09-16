@@ -4,7 +4,7 @@
 #pragma once
 
 #include <iostream>
-
+#include <future>
 #include "ThreadPool.h"
 #include "CallbackDispatcher.h"
 
@@ -14,6 +14,8 @@ class AsyncExecutor {
 public:
     using AsyncOperation = std::function<T()>;
     using Callback = std::function<void(T)>;
+    using ExceptionCallback = std::function<void(std::string)>;
+
 
     AsyncExecutor(ThreadPool& threadPool, CallbackDispatcher& dispatcher)
         : m_threadPool(threadPool), m_dispatcher(dispatcher) {}
