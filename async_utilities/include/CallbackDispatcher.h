@@ -1,12 +1,10 @@
-//
-// Created by maxim on 15.09.2024.
-//
 #pragma once
 #include <thread>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
 #include <functional>
+#include "LockFreeQueue.h"
 
 struct CallbackInfo {
     std::function<void()> task;
@@ -23,26 +21,28 @@ public:
     void post(std::function<void()> task, std::thread::id thread_id = std::thread::id()) {
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            m_tasks.emplace(std::move(task), thread_id);
+            m_tasks.enqueue(CallbackInfo(std::move(task), thread_id));
         }
         m_condition.notify_one();
     }
 
-    void execute_pending(size_t max_tasks = std::numeric_limits<size_t>::max()) {
+    bool execute_pending(size_t max_tasks = std::numeric_limits<size_t>::max()) {
         std::thread::id current_thread_id = std::this_thread::get_id();
         std::queue<CallbackInfo> tasks_to_execute;
+        bool tasks_executed = false;
 
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            while (!m_tasks.empty() && tasks_to_execute.size() < max_tasks) {
-                if (m_tasks.front().thread_id == std::thread::id() ||
-                    m_tasks.front().thread_id == current_thread_id) {
-                    tasks_to_execute.push(std::move(m_tasks.front()));
-                    m_tasks.pop();
-                } else {
-                    // If the task is for a different thread, move it to the back of the queue
-                    m_tasks.push(std::move(m_tasks.front()));
-                    m_tasks.pop();
+            while (!m_tasks.is_empty() && tasks_to_execute.size() < max_tasks) {
+                auto task = m_tasks.dequeue();
+                if (task) {
+                    if (task->thread_id == std::thread::id() ||
+                        task->thread_id == current_thread_id)
+                    {
+                        tasks_to_execute.push(std::move(*task));
+                    } else {
+                        m_tasks.enqueue(*task);
+                    }
                 }
             }
         }
@@ -50,14 +50,14 @@ public:
         while (!tasks_to_execute.empty()) {
             tasks_to_execute.front().task();
             tasks_to_execute.pop();
+            tasks_executed = true;
         }
+
+        return tasks_executed;
     }
 
-    void wait() {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        if (m_tasks.empty()) {
-            m_condition.wait(lock, [this]() { return !m_tasks.empty() || m_stopped; });
-        }
+    bool has_pending_tasks() const {
+        return !m_tasks.is_empty();
     }
 
     void stop() {
@@ -73,7 +73,7 @@ public:
     }
 
 private:
-    std::queue<CallbackInfo> m_tasks;
+    LockFreeQueue<CallbackInfo> m_tasks;
     std::mutex m_mutex;
     std::condition_variable m_condition;
     bool m_stopped;

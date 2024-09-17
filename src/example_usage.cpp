@@ -1,14 +1,16 @@
 #include "AsyncExecutor.h"
 #include <iostream>
+#include <chrono>
+#include <atomic>
 
 int main() {
     std::cout << "Starting advanced asynchronous system..." << std::endl;
 
-    // Create a thread pool
-    ThreadPool threadPool;
-
     // Create a dispatcher
     CallbackDispatcher dispatcher;
+
+    // Create a thread pool
+    ThreadPool threadPool(1000);
 
     // Create an AsyncExecutor instance
     AsyncExecutor<int> asyncExecutor(threadPool, dispatcher);
@@ -18,38 +20,41 @@ int main() {
         std::cout << "Asynchronous operation completed with result: " << result << std::endl;
     };
 
+    std::atomic<int> completed_tasks(0);
+    const int total_tasks = 1000;
+
+    std::vector<std::shared_ptr<CancellableOperation<int>>> operations;
+    operations.reserve(total_tasks);
+
     // Start multiple asynchronous operations
-    for (int i = 1; i < 6; ++i) {
-        asyncExecutor.start([i]() {
+    for (int i = 0; i < total_tasks; ++i) {
+        operations.push_back(asyncExecutor.start([i, &completed_tasks]() {
             std::this_thread::sleep_for(std::chrono::seconds(2));
-            return i * i;
-        }, completionHandler);
+            ++completed_tasks;
+            return i;
+        }, completionHandler));
     }
 
-    std::cout << "Asynchronous operations initiated. Main thread is free to continue..." << std::endl;
+    std::cout << "Asynchronous operations initiated. Main thread is processing callbacks..." << std::endl;
 
-    std::vector<std::future<int>> futures;
-    for (int i = 6; i < 11; ++i) {
-        futures.push_back(asyncExecutor.start([i]() {
-            std::this_thread::sleep_for(std::chrono::seconds(4));
-            return i * i;
-        })->getFuture());
-    }
+    // Process callbacks on the main thread
+    /*while (completed_tasks < total_tasks || dispatcher.has_pending_tasks()) {
+        dispatcher.execute_pending();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }*/
 
-    // Later, collect results
-    for (auto& future : futures) {
-        int result = future.get(); // Will wait until the result is available
+    std::cout << "All callbacks processed. Now collecting future results..." << std::endl;
+
+    // Now, collect results from futures
+    for (auto& op : operations) {
+        int result = op->getFuture().get(); // Will return immediately as all tasks are completed
         std::cout << "Future result: " << result << std::endl;
     }
-    dispatcher.execute_pending();
 
-    while (!dispatcher.is_stopped()) {
-        dispatcher.stop();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    // Stop the dispatcher and thread pool
+    dispatcher.stop();
+    threadPool.shutdown();
 
-    // Destructor of ThreadPool will wait for all tasks to complete
     std::cout << "Main thread completed." << std::endl;
     return 0;
 }
-
