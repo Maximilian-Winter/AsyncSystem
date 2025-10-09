@@ -2,7 +2,7 @@
 #include <atomic>
 #include <memory>
 #include <optional>
-
+#include <utility>
 
 template <typename T>
 class LockFreeQueue {
@@ -93,5 +93,58 @@ public:
     bool is_empty() const {
         Node* front = head.load(std::memory_order_acquire);
         return front->next.load(std::memory_order_acquire) == nullptr;
+    }
+};
+
+
+template <typename T>
+class ChaseLevDeque {
+    struct Node {
+        std::atomic<Node*> next{nullptr};
+        T data;
+    };
+
+    std::atomic<Node*> head{nullptr};
+    std::atomic<Node*> tail{nullptr};
+    std::atomic<std::size_t> size{0};
+
+public:
+    ChaseLevDeque() = default;
+    ~ChaseLevDeque() = default;
+
+    void enqueue(const T& value) {
+        Node* new_node = new Node{nullptr, value};
+        Node* old_tail;
+        Node* new_tail;
+
+        do {
+            old_tail = tail.load(std::memory_order_relaxed);
+            new_tail = old_tail;
+            if (old_tail->next.load(std::memory_order_relaxed) != nullptr) {
+                tail.compare_exchange_weak(old_tail, old_tail->next.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                continue;
+            }
+            new_tail->next.store(new_node, std::memory_order_relaxed);
+        } while (!tail.compare_exchange_weak(old_tail, new_tail, std::memory_order_relaxed));
+
+        size.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    bool dequeue(T& value) {
+        Node* old_head;
+        Node* old_next;
+
+        do {
+            old_head = head.load(std::memory_order_relaxed);
+            old_next = old_head->next.load(std::memory_order_relaxed);
+            if (old_next == nullptr) {
+                return false;
+            }
+        } while (!head.compare_exchange_weak(old_head, old_next, std::memory_order_relaxed));
+
+        value = old_next->data;
+        delete old_head;
+        size.fetch_sub(1, std::memory_order_relaxed);
+        return true;
     }
 };

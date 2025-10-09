@@ -38,10 +38,10 @@ int main() {
     std::cout << "Asynchronous operations initiated. Main thread is processing callbacks..." << std::endl;
 
     // Process callbacks on the main thread
-    /*while (completed_tasks < total_tasks || dispatcher.has_pending_tasks()) {
+    while (completed_tasks < total_tasks || dispatcher.has_pending_tasks()) {
         dispatcher.execute_pending();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }*/
+    }
 
     std::cout << "All callbacks processed. Now collecting future results..." << std::endl;
 
