@@ -16,7 +16,6 @@ public:
 
     AsyncSystem(size_t threadCount = std::thread::hardware_concurrency())
         : m_threadPool(threadCount),
-          m_dispatcher(),
           m_asyncExecutor(m_threadPool, m_dispatcher),
           m_running(false),
           m_nextTaskId(0) {}
@@ -56,7 +55,7 @@ public:
 
     TaskId scheduleAsyncTask(AsyncTask task, CompletionHandler handler) {
         TaskId id = getNextTaskId();
-        m_asyncExecutor.start<void>([task = std::move(task)]() { task(); }, 
+        m_asyncExecutor.start([task = std::move(task)]() { task(); },
             [this, id, handler = std::move(handler)]() {
                 m_dispatcher.post([this, id, handler = std::move(handler)]() {
                     handler();

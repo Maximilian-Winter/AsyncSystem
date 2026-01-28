@@ -10,7 +10,7 @@ int main() {
     AsyncSystem system;
 
     // Set main loop
-    system.setMainLoop([]() {
+    system.addMainLoopTask( {
         std::cout << "Main loop tick" << std::endl;
     }, std::chrono::seconds(1));
 
